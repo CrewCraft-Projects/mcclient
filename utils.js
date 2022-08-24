@@ -26,13 +26,13 @@ class Utils {
 		Utils.dataDirectory = os.homedir();
 		switch(Utils.getOsName()) {
 			case "linux":
-				Utils.dataDirectory += "/.config/Sol Client";
+				Utils.dataDirectory += "/.config/Galactiq Client";
 				break;
 			case "osx":
-				Utils.dataDirectory += "/Library/Application Support/Sol Client";
+				Utils.dataDirectory += "/Library/Application Support/Galactiq Client";
 				break;
 			case "windows":
-				Utils.dataDirectory += "/AppData/Roaming/Sol Client";
+				Utils.dataDirectory += "/AppData/Roaming/Galactiq Client";
 				break;
 		}
 

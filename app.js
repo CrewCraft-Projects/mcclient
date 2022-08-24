@@ -51,7 +51,7 @@ window.addEventListener("DOMContentLoaded", async() => {
 
 	const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-	fetch("https://sol-client.github.io/news.html", {
+	fetch("https://client.galactiq.net/news.html", {
 				headers: {
 					"Cache-Control": "no-cache"
 				}

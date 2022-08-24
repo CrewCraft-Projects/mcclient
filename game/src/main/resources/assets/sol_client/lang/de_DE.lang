@@ -27,7 +27,7 @@ sol_client.file.edit=Datei bearbeiten...
 
 sol_client.servers=Server
 
-sol_client.key.category=Sol Client
+sol_client.key.category=Galactiq Client
 sol_client.key.accept_request=Anfrage annehmen
 sol_client.key.dismiss_request=Anfrage 
 
@@ -40,8 +40,8 @@ sol_client.mod.simple_hud.option.borderColour=Umrissfarbe
 sol_client.mod.simple_hud.option.textColour=Textfarbe
 sol_client.mod.simple_hud.option.shadow=Textschatten
 
-sol_client.mod.sol_client.name=Sol Client
-sol_client.mod.sol_client.description=Generelle Einstellungen für Sol Client.
+sol_client.mod.sol_client.name=Galactiq Client
+sol_client.mod.sol_client.description=Generelle Einstellungen für Galaciq Client.
 
 sol_client.mod.sol_client.option.fancyMainMenu=Hauptmenü
 sol_client.mod.sol_client.option.logoInInventory=Symbol im Inventar anzeigen

@@ -37,7 +37,7 @@ async function run() {
 			webPreferences: {
 				preload: path.join(__dirname, "app.js")
 			},
-			title: "Sol Client " + Utils.version,
+			title: "Galactiq Client " + Utils.version,
 			show: false,
 			backgroundColor: "#1e1e1e",
 			darkTheme: true
@@ -157,7 +157,7 @@ If you have private messages, try reproducing this issue again.`,
 [Game Log on Hastebin](${hasteUrl})`
 		}
 
-		let running = `Running Sol Client v${Utils.version}`;
+		let running = `Running Galactiq Client v${Utils.version}`;
 
 		if(optifine) {
 			running += " with " + optifine;

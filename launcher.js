@@ -450,7 +450,7 @@ class Launcher {
 		args.push("net.minecraft.launchwrapper.Launch");
 
 		args.push("--version");
-		args.push("Sol Client");
+		args.push("Galactiq Client");
 
 		let activeAccount = this.accountManager.activeAccount;
 

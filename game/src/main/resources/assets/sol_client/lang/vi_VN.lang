@@ -27,7 +27,7 @@ sol_client.file.edit=Chỉnh sửa tập tin...
 
 sol_client.servers=Danh sách máy chủ
 
-sol_client.key.category=Sol Client
+sol_client.key.category=Galaciq Client
 sol_client.key.accept_request=Chấp nhận yêu cầu
 sol_client.key.dismiss_request=Từ chối yêu cầu
 
@@ -41,8 +41,8 @@ sol_client.mod.simple_hud.option.textColour=Màu chữ
 sol_client.mod.simple_hud.option.shadow=Bóng chữ
 sol_client.mod.smooth_counter_hud.option.smoothNumbers=Hiệu ứng thay đổi số
 
-sol_client.mod.sol_client.name=Sol Client
-sol_client.mod.sol_client.description=Các thiết lập chung của Sol Client.
+sol_client.mod.sol_client.name=Galaciq Client
+sol_client.mod.sol_client.description=Các thiết lập chung của Galaciq Client.
 
 sol_client.mod.sol_client.option.fancyMainMenu=Màn hình chính
 sol_client.mod.sol_client.option.logoInInventory=Hiện Logo ở giao diện Túi đồ
