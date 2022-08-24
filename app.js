@@ -3,16 +3,20 @@ const Utils = require("./utils");
 const Config = require("./config");
 const launcher = Launcher.instance;
 const { ipcRenderer, shell } = require("electron");
-const { MicrosoftAuthService, YggdrasilAuthService, Account } = require("./auth");
+const { MicrosoftAuthService, YggdrasilAuthService, Account, AccountManager } = require("./auth");
 const microsoftAuthService = MicrosoftAuthService.instance;
 const yggdrasilAuthService = YggdrasilAuthService.instance;
 const fs = require("fs");
 const msmc = require("msmc");
 const os = require("os");
 const nbt = require("nbt");
+const vm = require("vm");
+const url = require("url");
+const path = require("path");
+const axios = require("axios");
 
 Utils.init();
-Config.init(Utils.minecraftDirectory);
+Config.init(Utils.dataDirectory);
 Config.load();
 
 ipcRenderer.on("close", (event) => {
@@ -27,8 +31,13 @@ ipcRenderer.on("quitGame", (event) => {
 	ipcRenderer.send("quit", true);
 });
 
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async() => {
+	if(Utils.getOsName() == "osx") {
+		document.querySelector(".drag-region").style.display = "block";
+	}
+
 	const playButton = document.getElementById("launch-button");
+	const launchNote = document.getElementById("launch-note");
 	const microsoftLoginButton = document.querySelector(".microsoft-login-button");
 	const mojangLoginButton = document.querySelector(".mojang-login-button");
 	const accountButton = document.querySelector(".account-button");
@@ -36,37 +45,177 @@ window.addEventListener("DOMContentLoaded", () => {
 	const login = document.querySelector(".login");
 	const mojangLogin = document.querySelector(".mojang-login");
 	const main = document.querySelector(".main");
+	const accounts = document.querySelector(".accounts");
+	const backToMain = document.querySelector(".back-to-main-button");
+	const news = document.querySelector(".news");
 
-	function saveAccount(account) {
-		fs.writeFileSync(Utils.accountFile, JSON.stringify(account));
+	const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+	fetch("https://sol-client.github.io/news.html", {
+				headers: {
+					"Cache-Control": "no-cache"
+				}
+			})
+			.then(async(response, error) => {
+				let today = new Date();
+
+				news.innerHTML = "<br/>" + await response.text();
+				for(let timeElement of news.getElementsByTagName("time")) {
+					let datetime = timeElement.getAttribute("datetime");
+
+					if(datetime == "future") {
+						timeElement.innerText = "The Future";
+						continue;
+					}
+
+					let todayYear = today.getFullYear();
+					let todayMonth = today.getMonth() + 1;
+					let todayDay = today.getDate();
+
+					let year = parseInt(datetime.substring(0, 4));
+					let month = parseInt(datetime.substring(5, 7));
+					let day = parseInt(datetime.substring(8, 10));
+
+					if(todayYear == year && todayMonth == month) {
+						if(todayDay == day) {
+							timeElement.innerText = "Today";
+							continue;
+						}
+						else if(todayDay - 1 == day) {
+							timeElement.innerText = "Yesterday";
+							continue;
+						}
+					}
+
+
+					let friendlyName = day + " " + monthNames[month - 1];
+
+					if(today.getFullYear() != year) {
+						friendlyName += " " + year;
+					}
+
+					timeElement.innerText = friendlyName;
+				}
+			})
+			.catch((error) => {
+				console.error(error);
+				news.innerHTML = `<p>${error}</p>`;
+			});
+
+	launcher.accountManager = new AccountManager(Utils.accountsFile, (account) => {
+		if(account == launcher.accountManager.activeAccount) {
+			updateAccount();
+		}
+
+		if(accounts.style.display) {
+			updateAccounts();
+		}
+	});
+
+	for(let account of launcher.accountManager.accounts) {
+		await launcher.accountManager.storeInKeychain(account);
 	}
 
-	function updateAccount(account) {
-		document.querySelector(".account-button").innerText = "🗘 " + account.username;
+	function updateAccount() {
+		if(launcher.accountManager.activeAccount) {
+			document.querySelector(".account-button").innerHTML = `<img src="${launcher.accountManager.activeAccount.head}"/> <span>${launcher.accountManager.activeAccount.username} <img src="arrow.svg" class="arrow-icon"/></span>`;
+		}
 	}
 
 	function updateMinecraftFolder() {
-		document.querySelector(".minecraft-folder-path").innerText = Config.data.minecraftFolder;
+		document.querySelector(".minecraft-folder-path").innerText =
+				Config.data.minecraftFolder ?? "(use default)";
+		// wow. I didn't know you could do that in js.
+	}
+
+	function updateJre() {
+		document.querySelector(".jre-location").innerText =
+				Config.data.jrePath ?? "(download automatically)"
 	}
 
 	updateMinecraftFolder();
+	updateJre();
 
-	if(fs.existsSync(Utils.accountFile)) {
-		var account = Account.from(JSON.parse(fs.readFileSync(Utils.accountFile)));
-		launcher.account = account;
+	backToMain.onclick = () => {
+		if(loggingIn) {
+			return;
+		}
+
+		login.style.display = null;
 		main.style.display = "block";
-		updateAccount(account);
+	};
+
+	if(launcher.accountManager.activeAccount != null) {
+		main.style.display = "block";
+		updateAccount();
 	}
 	else {
 		login.style.display = "block";
+		backToMain.style.display = null;
 	}
 
-	var launching = false;
-	var loggingIn = false;
+	let launching = false;
+	let loggingIn = false;
+
+	document.onmousedown = (event) => {
+		if(!main.style.display) {
+			return;
+		}
+
+		if(!accounts.contains(event.target) && !accountButton.contains(event.target)) {
+			accounts.style.display = null;
+		}
+	};
+
+	function updateAccounts() {
+		accounts.innerHTML = "";
+
+		for(let account of launcher.accountManager.accounts) {
+			let accountElement = document.createElement("div");
+			accountElement.classList.add("account");
+			accountElement.innerHTML = `<img src="${account.head}"/> <span>${account.username}</span> <button class="remove-account"><img src="remove.svg"/></button>`;
+			accountElement.onclick = async(event) => {
+				if(event.target.classList.contains("remove-account")
+						|| event.target.parentElement.classList.contains("remove-account")) {
+					if(!(await launcher.accountManager.removeAccount(account))) {
+						main.style.display = null;
+						login.style.display = "block";
+						backToMain.style.display = null;
+					}
+					else {
+						updateAccounts();
+					}
+				}
+				else {
+					launcher.accountManager.switchAccount(account);
+					accounts.style.display = null;
+				}
+				updateAccount();
+			};
+			accounts.appendChild(accountElement);
+		}
+
+		let addElement = document.createElement("div");
+		addElement.classList.add("account");
+		addElement.innerHTML = `<img src="add.svg"/> <span>Add Account</span>`;
+		addElement.onclick = () => {
+			main.style.display = null;
+			login.style.display = "block";
+			backToMain.style.display = "block";
+		};
+
+		accounts.appendChild(addElement);
+
+		accounts.style.display = "block";
+	}
 
 	accountButton.onclick = () => {
-		main.style.display = "none";
-		login.style.display = "block";
+		if(accounts.style.display) {
+			accounts.style.display = null;
+			return;
+		}
+
+		updateAccounts();
 	};
 
 	microsoftLoginButton.onclick = () => {
@@ -77,7 +226,7 @@ window.addEventListener("DOMContentLoaded", () => {
 		}
 	};
 
-	ipcRenderer.on("msa", (event, result) => {
+	ipcRenderer.on("msa", async(event, result) => {
 		loggingIn = false;
 		microsoftLoginButton.innerText = "Microsoft Account";
 		result = JSON.parse(result);
@@ -88,12 +237,12 @@ window.addEventListener("DOMContentLoaded", () => {
 			alert("Could not log in: " + result.type);
 			return;
 		}
-		var account = microsoftAuthService.authenticate(result.profile);
-		launcher.account = account;
+		let account = await microsoftAuthService.authenticate(result.profile);
+		launcher.accountManager.addAccount(account);
 		login.style.display = "none";
 		main.style.display = "block";
-		saveAccount(account);
-		updateAccount(account);
+		updateAccount();
+		updateAccounts();
 	})
 
 	mojangLoginButton.onclick = () => {
@@ -106,24 +255,32 @@ window.addEventListener("DOMContentLoaded", () => {
 	async function play(server) {
 		if(!launching) {
 			launching = true;
+
+			launchNote.style.display = "inline";
 			playButton.innerText = "...";
-			var valid = await launcher.account.getService().validate(launcher.account);
-			if(!valid) {
-				var result = await launcher.account.getService().refresh(launcher.account);
-				if(!result) {
-					main.style.display = "none";
-					login.style.display = "block";
-					playButton.innerText = "Play";
-					launching = false;
-					return;
+			launchNote.innerText = "Refreshing login...";
+			try {
+				await launcher.accountManager.refreshAccount(launcher.accountManager.activeAccount);
+			}
+			catch(error) {
+				console.error(error);
+				if(launcher.accountManager.activeAccount) {
+					updateAccount();
 				}
-				launcher.account = result;
-				saveAccount(launcher.account);
+
+				main.style.display = "none";
+				login.style.display = "block";
+				backToMain.style.display = launcher.accountManager.accounts.length > 0 ? "block" : "none";
+				playButton.innerText = "Play";
+				launching = false;
+				launchNote.style.display = null;
+				return;
 			}
 			launcher.launch(() => {
 				playButton.innerText = "Play";
 				launching = false;
-			}, server);
+				launchNote.style.display = null;
+			}, (text) => launchNote.innerText = text, server);
 		}
 	}
 
@@ -135,26 +292,42 @@ window.addEventListener("DOMContentLoaded", () => {
 	};
 
 	document.querySelector(".about-tab").onclick = () => switchToTab("about");
-
 	document.querySelector(".settings-tab").onclick = () => switchToTab("settings");
-
-	document.querySelector(".minecraft-folder").onclick = () => ipcRenderer.send("directory");
-
-	ipcRenderer.on("directory", (event, file) => {
-		Config.data.minecraftFolder = file;
+	document.querySelector(".news-tab").onclick = () => switchToTab("news");
+	document.querySelector(".minecraft-folder").onclick = () => ipcRenderer.send("directory", "Select Minecraft Folder", "minecraft");
+	document.querySelector(".jre-location-change").onclick = () => ipcRenderer.send("directory", "Select JRE Folder", "jre");
+	document.querySelector(".jre-location-reset").onclick = () => {
+		Config.data.jrePath = null;
 		Config.save();
-		updateMinecraftFolder();
-		updateServers();
+		updateJre();
+	};
+
+	ipcRenderer.on("directory", (event, file, id) => {
+		switch(id) {
+			case "minecraft":
+				Config.data.minecraftFolder = file;
+				Config.save();
+				updateMinecraftFolder();
+				updateServers();
+				break;
+			case "jre":
+				if(!fs.existsSync(path.join(file, "bin/java"))) {
+					ipcRenderer.send("jreError");
+					return;
+				}
+				Config.data.jrePath = file;
+				Config.save();
+				updateJre();
+				break;
+		}
 	});
 
 	document.querySelector(".devtools").onclick = () => ipcRenderer.send("devtools");
 
 	function updateServers() {
-		var serversList = document.querySelector(".quick-servers");
-		var serversFile = Config.getGameDirectory(Utils.gameDirectory) + "/servers.dat";
-		var serverText = document.querySelector(".quick-join-text");
-
-		serversList.innerHTML = "";
+		let serversList = document.querySelector(".quick-servers");
+		let serversFile = Config.getGameDirectory(Utils.gameDirectory) + "/servers.dat";
+		let serverText = document.querySelector(".quick-join-text");
 
 		if(fs.existsSync(serversFile)) {
 			nbt.parse(fs.readFileSync(serversFile), (error, data) => {
@@ -162,10 +335,14 @@ window.addEventListener("DOMContentLoaded", () => {
 					throw error;
 				}
 
-				var servers = data.value.servers.value.value;
+				let servers = data.value.servers.value.value;
 
-				for(var i = 0; i < servers.length && i < 5; i++) {
-					 // first time I've ever needed to use the let keyword
+				if(servers.length > 0) {
+					serversList.innerHTML = "";
+				}
+
+				for(let i = 0; i < servers.length && i < 5; i++) {
+					// first time I've ever needed to use the let keyword
 					let server = servers[i];
 					let serverIndex = i;
 
@@ -192,41 +369,60 @@ window.addEventListener("DOMContentLoaded", () => {
 			});
 		}
 	}
+
 	updateServers();
 
-	var memory = document.querySelector(".memory");
-	var memoryLabel = document.querySelector(".memory-label");
+	let memory = document.querySelector(".memory");
+	let memoryLabel = document.querySelector(".memory-label");
 
 	memory.max = os.totalmem() / 1024 / 1024;
 	memory.value = Config.data.maxMemory;
 
-	var optifine = document.querySelector(".optifine");
+	let optifine = document.querySelector(".optifine");
 	optifine.checked = Config.data.optifine;
 	optifine.onchange = () => {
 		Config.data.optifine = optifine.checked;
 		Config.save();
-	}
+	};
+
+	let autoUpdate = document.querySelector(".auto-update");
+	autoUpdate.checked = Config.data.autoUpdate;
+	autoUpdate.onchange = () => {
+		Config.data.autoUpdate = autoUpdate.checked;
+		Config.save();
+	};
+
+	let jvmArguments = document.querySelector(".jvm-arguments");
+	jvmArguments.value = Config.data.jvmArgs;
+	jvmArguments.onchange = () => {
+		Config.data.jvmArgs = jvmArguments.value;
+		Config.save();
+	};
 
 	function updateMemoryLabel() {
 		memoryLabel.innerText = (memory.value / 1024).toFixed(1) + " GB";
 		Config.data.maxMemory = memory.value;
-	}
+	};
 
 	memory.oninput = updateMemoryLabel;
 	memory.onchange = Config.save;
 
 	updateMemoryLabel();
 
+	let currentTab = "about";
+
 	function switchToTab(tab) {
-			document.querySelector(".about").style.display = "none";
-			document.querySelector(".settings").style.display = "none";
+		document.querySelector("." + currentTab).style.display = "none";
 
-			playButton.style.display = null;
+		playButton.style.display = null;
 
-			document.querySelector(".about-tab").classList.remove("selected-tab");
-			document.querySelector(".settings-tab").classList.remove("selected-tab");
-			document.querySelector("." + tab).style.display = "block";
-			document.querySelector("." + tab + "-tab").classList.add("selected-tab");
+		document.querySelector(".about-tab").classList.remove("selected-tab");
+		document.querySelector(".settings-tab").classList.remove("selected-tab");
+		document.querySelector(".news-tab").classList.remove("selected-tab");
+		document.querySelector("." + tab).style.display = "block";
+		document.querySelector("." + tab + "-tab").classList.add("selected-tab");
+
+		currentTab = tab;
 	}
 
 	const loginButtonMojang = document.querySelector(".login-button-mojang");
@@ -239,15 +435,15 @@ window.addEventListener("DOMContentLoaded", () => {
 			loggingIn = true;
 			loginButtonMojang.innerText = "...";
 			try {
-				var account = await yggdrasilAuthService.authenticateUsernamePassword(emailField.value, passwordField.value);
-				launcher.account = account;
+				let account = await yggdrasilAuthService.authenticateUsernamePassword(emailField.value, passwordField.value);
+				launcher.accountManager.addAccount(account);
 				mojangLogin.style.display = "none";
 				main.style.display = "block";
 				emailField.value = "";
 				passwordField.value = "";
 				errorMessage.innerText = "";
-				saveAccount(account);
-				updateAccount(account);
+				updateAccount();
+				updateAccounts();
 			}
 			catch(error) {
 				errorMessage.innerText = "Could not log in";
@@ -257,7 +453,7 @@ window.addEventListener("DOMContentLoaded", () => {
 		}
 	};
 
-	for(var element of document.querySelectorAll(".open-in-browser")) {
+	for(let element of document.querySelectorAll(".open-in-browser")) {
 		const href = element.href;
 		element.href = "javascript:void(0);";
 		element.onclick = function(event) {

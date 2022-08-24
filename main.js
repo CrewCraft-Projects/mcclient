@@ -1,35 +1,60 @@
 async function run() {
 	if(require("electron-squirrel-startup")) return;
 
+    const fs = require("fs");
+
 	const Updater = require("./updater");
 	const Utils = require("./utils");
+	const Config = require("./config");
 
 	Utils.init();
+	Config.init(Utils.dataDirectory);
+	Config.load();
 
-	if(!require("electron-is-dev") && Utils.getOsName() == "windows" && (await Updater.update())) {
+	const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
+
+	ipcMain.on("disableUpdates", async() => {
+		Config.data.autoUpdate = false;
+		Config.save();
+	});
+
+	if(Config.data.autoUpdate && await Updater.update()) {
 		return;
 	}
 
-	const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 	const path = require("path");
 	const msmc = require("msmc");
 	const hastebin = require("hastebin");
 
-	var window;
-	var canQuit = false;
+	let window;
+	let canQuit = false;
 
 	function createWindow() {
-		window = new BrowserWindow({
+		let options = {
 			width: 800,
-			height: 600,
+			height: 650,
 			icon: __dirname + "/assets/icon.png",
 			webPreferences: {
 				preload: path.join(__dirname, "app.js")
-			}
-		});
+			},
+			title: "Sol Client " + Utils.version,
+			show: false,
+			backgroundColor: "#1e1e1e",
+			darkTheme: true
+		};
+
+		if(Utils.getOsName() == "osx") {
+			options.titleBarStyle = "hidden";
+		}
+
+		window = new BrowserWindow(options);
 
 		window.loadFile("app.html");
 		window.setMenu(null);
+
+		if(process.env.DEVTOOLS) {
+			window.webContents.openDevTools();
+		}
 
 		window.on("close", (event) => {
 			if(!canQuit) {
@@ -38,31 +63,65 @@ async function run() {
 			}
 		});
 
-		ipcMain.on("directory", async(event) => {
-			var result = await dialog.showOpenDialog(window,
+		window.once("ready-to-show", () => window.show());
+
+		ipcMain.on("directory", async(event, title, id) => {
+			let result = await dialog.showOpenDialog(window,
 				{
-					title: "Select Minecraft Folder",
+					title: title,
 					properties: ["openDirectory" ]
 				}
 			);
 
-			var file = result.filePaths[0];
+			let file = result.filePaths[0];
 
 			if(!result.canceled && file) {
-				event.sender.send("directory", file);
+				event.sender.send("directory", file, id);
+			}
+		});
+
+		ipcMain.on("jreError", async(event) => {
+			dialog.showMessageBoxSync(window, {
+				title: "Invalid Directory",
+				message: "JRE must include bin folder."
+			});
+		});
+
+		ipcMain.on("skinFile", async(event) => {
+			let result = await dialog.showOpenDialog(window,
+				{
+					title: "Select Skin File",
+					filters: [
+						{
+							name: "Minecraft Skins",
+							extensions: ["png"]
+						},
+						{
+							name: "All Files",
+							extensions: ["*"]
+						}
+					]
+				}
+			);
+
+			let file = result.filePaths[0];
+
+			if(!result.canceled && file) {
+				event.sender.send("skinFile", file);
 			}
 		});
 	}
 
 	ipcMain.on("msa", async(event) => {
 		msmc.fastLaunch("electron", () => {})
-				.then((result) => {
-			event.sender.send("msa", JSON.stringify(result));
-		});
+				.then(async(result) => {
+					await window.webContents.session.clearStorageData();
+					event.sender.send("msa", JSON.stringify(result));
+				});
 	});
 
 	ipcMain.on("crash", async(_event, report, file, optifine) => {
-		var option = dialog.showMessageBoxSync(window, {
+		let option = dialog.showMessageBoxSync(window, {
 			title: "Game Crashed",
 			message: `The game has crashed.
 You may submit a report on GitHub, so it can be fixed.
@@ -76,8 +135,6 @@ If you have private messages, try reproducing this issue again.`,
 			]
 		});
 
-		// Indentation matters.
-
 		if(option == 1) {
 			shell.openPath(file);
 		}
@@ -85,7 +142,7 @@ If you have private messages, try reproducing this issue again.`,
 			return;
 		}
 
-		var crashReportText = "Add any applicable crash reports, making sure not to include any personal information. It is most important that you do not include the session id.";
+		let crashReportText = "Add any applicable crash reports, making sure not to include any personal information. It is most important that you do not include the session id.";
 		if(report) {
 			report = report.replace(/\[.*\] \[.*\]: \(Session ID is .{3,}\)/gm, "<censored>");
 
@@ -100,25 +157,26 @@ If you have private messages, try reproducing this issue again.`,
 [Game Log on Hastebin](${hasteUrl})`
 		}
 
-		var running = `Running CC Client v${Utils.version}`;
+		let running = `Running Sol Client v${Utils.version}`;
 
 		if(optifine) {
 			running += " with " + optifine;
 		}
+
+		running += " on " + Utils.getNiceOsName();
 		running += ".";
 
-		var url = new URL("https://discord.gg/RjpQg5E3Tt")
-		url.searchParams.set("body", `## Description
+		let url = new URL("https://github.com/TheKodeToad/Sol-Client/issues/new/")
+		url.searchParams.set("body", `## Description (please fill in)
 A description of the problem that is occurring.
 ## Steps to Reproduce
 1. What did you do...
 2. ...to crash the game?
-## Client Version
+## Details
 ${running}
 ## Logs/Crash Report
 ${crashReportText}
 `);
-		url.searchParams.set("title", "Short Description")
 		url.searchParams.set("labels", "bug");
 		shell.openExternal(url.toString());
 	});

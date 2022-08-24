@@ -7,13 +7,15 @@ const axios = require("axios");
 
 class Utils {
 
-	static minecraftDirectory;
+	static dataDirectory;
 	static legacyDirectory;
+	static minecraftDirectory;
 	static librariesDirectory;
 	static versionsDirectory;
 	static assetsDirectory;
 	static assetObjectsDirectory;
 	static assetIndexesDirectory;
+	static accountsFile;
 	static gameDirectory;
 	static serversFile;
 	static version = require("./package.json").version;
@@ -21,67 +23,112 @@ class Utils {
 	static latestLog;
 
 	static init() {
-		Utils.minecraftDirectory = os.homedir();
-		Utils.legacyDirectory = os.homedir();
+		Utils.dataDirectory = os.homedir();
 		switch(Utils.getOsName()) {
 			case "linux":
-				Utils.minecraftDirectory += "/.config/Sol Client";
-				Utils.legacyDirectory += "/.config/parrotclient";
+				Utils.dataDirectory += "/.config/Sol Client";
 				break;
 			case "osx":
-				Utils.minecraftDirectory += "/Library/Application Support/Sol Client";
-				Utils.legacyDirectory += "/Library/Application Support/parrotclient";
+				Utils.dataDirectory += "/Library/Application Support/Sol Client";
 				break;
 			case "windows":
-				Utils.minecraftDirectory += "/AppData/Roaming/Sol Client";
-				Utils.legacyDirectory += "/AppData/Roaming/parrotclient";
+				Utils.dataDirectory += "/AppData/Roaming/Sol Client";
 				break;
 		}
 
-		try {
-			if(fs.existsSync(Utils.legacyDirectory) && !fs.existsSync(Utils.minecraftDirectory)) {
-				fs.renameSync(Utils.legacyDirectory, Utils.minecraftDirectory);
-				fs.unlinkSync(Utils.minecraftDirectory + "/account.json");
-			}
-		}
-		catch(error) {
+		Utils.minecraftDirectory = os.homedir();
+		switch(Utils.getOsName()) {
+			case "linux":
+				Utils.minecraftDirectory += "/.minecraft";
+				break;
+			case "osx":
+				Utils.minecraftDirectory += "/Library/Application Support/minecraft";
+				break;
+			case "windows":
+				Utils.minecraftDirectory += "/AppData/Roaming/.minecraft";
+				break;
 		}
 
 		Utils.librariesDirectory = Utils.minecraftDirectory + "/libraries";
-		Utils.versionsDirectory = Utils.minecraftDirectory + "/versions";
+		Utils.versionsDirectory = Utils.dataDirectory + "/versions";
 		Utils.assetsDirectory = Utils.minecraftDirectory + "/assets";
 		Utils.assetObjectsDirectory = Utils.assetsDirectory + "/objects";
 		Utils.assetIndexesDirectory = Utils.assetsDirectory + "/indexes";
-		Utils.accountFile = Utils.minecraftDirectory + "/account.json";
-		Utils.gameDirectory = Utils.minecraftDirectory + "/minecraft";
+		Utils.accountsFile = Utils.dataDirectory + "/accounts.json";
+
+		let accountFile = Utils.dataDirectory + "/account.json";
+		if(fs.existsSync(accountFile) && !fs.existsSync(Utils.accountsFile)) {
+			let oldAccount = JSON.parse(fs.readFileSync(accountFile, "UTF-8"));
+			let converted = { accounts: [oldAccount], activeAccount: 0 }
+			fs.writeFileSync(Utils.accountsFile, JSON.stringify(converted));
+			fs.rmSync(accountFile);
+		}
+
+		Utils.skinsFile = Utils.dataDirectory + "/skins.json";
+		Utils.gameDirectory = Utils.dataDirectory + "/minecraft";
 
 		if(!fs.existsSync(Utils.gameDirectory)) {
 			fs.mkdirSync(Utils.gameDirectory, { recursive: true });
 		}
+
+		if(!fs.existsSync(Utils.minecraftDirectory)) {
+			fs.mkdirSync(Utils.minecraftDirectory, { recursive: true });
+		}
 	}
 
 	static isAlreadyDownloaded(file, size) {
-		return fs.existsSync(file) && (size == -1 || fs.statSync(file).size == size);
+		return size != -1 && fs.existsSync(file) && fs.statSync(file).size == size;
 	}
 
-	static download(url, file, size) {
+	static download(url, file, size, progressConsumer) {
 		if(!fs.existsSync(path.dirname(file))) {
 			fs.mkdirSync(path.dirname(file), { recursive: true });
 		}
 
 		if(!Utils.isAlreadyDownloaded(file, size)) {
-			return new Promise((resolve) => {
-				(url.startsWith("https://") ? https : http).get(url, async(response) => {
-					if(response.code == 404) {
-						resolve(false);
+			return new Promise((resolve, reject) => {
+				(url.startsWith("https://") ? https : http).get(url, async(response, error) => {
+					if(error) {
+						reject(error);
+						return;
 					}
+
+					let length;
+					if(response.headers["content-length"]) {
+						length = parseInt(response.headers["content-length"]);
+					}
+					else {
+						length = 0;
+					}
+
+					let receivedBytes = 0;
+
+					if(response.code > 400) {
+						reject(new Error("Server responded with error " + response.code));
+						return;
+					}
+
 					if(response.headers.location) {
-						var result = await Utils.download(response.headers.location, file, size);
+						let result = await Utils.download(response.headers.location, file, size, progressConsumer);
 						resolve(result);
 						return;
 					}
-					var stream = fs.createWriteStream(file);
+
+					let stream = fs.createWriteStream(file);
 					response.pipe(stream);
+
+					if(progressConsumer) {
+						if(!progressConsumer(0)) {
+							stream.end();
+						}
+						response.on("data", (chunk) => {
+							receivedBytes += chunk.length;
+							if(!progressConsumer(receivedBytes / length * 100)) {
+								stream.end();
+							}
+						});
+					}
+
 					response.on("end", () => {
 						stream.close();
 						resolve(true);
@@ -96,7 +143,7 @@ class Utils {
 		return new Promise((resolve) => {
 			axios.get("https://optifine.net/adloadx?f=OptiFine_" + version + ".jar")
 				.then((response) => {
-					var link = "https://optifine.net/downloadx?f=" +
+					let link = "https://optifine.net/downloadx?f=" +
 							response.data.substring(response.data
 									.indexOf("<a href='downloadx?f=")
 									 		+ "<a href='downloadx?f=".length, response.data.indexOf("' onclick='onDownload()'>"))
@@ -125,6 +172,79 @@ class Utils {
 			case "Windows_NT":
 				return "windows";
 		}
+	}
+
+	static getNiceOsName() {
+		switch(os.type()) {
+			case "Linux":
+				return "Linux";
+			case "Darwin":
+				return "macOS";
+			case "Windows_NT":
+				return "Windows";
+		}
+	}
+
+	// Expands an image URL into full data url
+	// Heavily based around https://stackoverflow.com/a/64929732
+	static expandImageURL(url) {
+		return new Promise(async(resolve) => {
+			let data = await fetch(url);
+			let reader = new FileReader();
+			reader.readAsDataURL(await data.blob());
+			reader.onloadend = () => {
+				resolve(reader.result);
+			};
+		});
+	}
+
+	static expandImageFile(file) {
+		return "data:image/png;base64," + fs.readFileSync(file).toString("base64");
+	}
+
+	static loadImage(url) {
+		return new Promise(async(resolve) => {
+			let image = new Image();
+			image.onload = () => {
+				resolve(image);
+			};
+			image.src = url;
+		})
+	}
+
+	static getTextures(uuid) {
+		return new Promise(async(resolve) => {
+			let profile = await axios.get("https://sessionserver.mojang.com/session/minecraft/profile/" + uuid);
+
+			if(!profile.data) {
+				return;
+			}
+			else {
+				for(let property of profile.data.properties) {
+					if(property.name == "textures") {
+						resolve(JSON.parse(atob(property.value)).textures);
+						return;
+					}
+				}
+			}
+
+			resolve(null);
+		});
+	}
+
+	static getProfile(username) {
+		return new Promise(async(resolve) => {
+			try {
+				resolve((await axios.get("https://api.mojang.com/users/profiles/minecraft/" + username)).data);
+			}
+			catch(error) {
+				resolve(null);
+			}
+		});
+	}
+
+	static dataURLToBuffer(url) {
+		return Buffer.from(url.substring(url.indexOf(",")), "base64");
 	}
 
 }
