@@ -35,7 +35,7 @@ public class SolClientMod extends ConfigOnlyMod {
 
 	@Expose
 	@Option
-	public Colour uiColour = new Colour(255, 180, 0);
+	public Colour uiColour = new Colour(0, 176, 121);
 	public Colour uiHover;
 
 	@Expose

@@ -127,7 +127,7 @@ public class Client {
 
 	public static final String VERSION = System.getProperty("io.github.solclient.client.version", "DEVELOPMENT TEST");
 	public static final String NAME = "Galactiq Client " + VERSION;
-	public static final String KEY_TRANSLATION_KEY = "sol_client.key";
+	public static final String KEY_TRANSLATION_KEY = "galactiq_client.key";
 	public static final String KEY_CATEGORY = KEY_TRANSLATION_KEY + ".category";
 	public static final boolean DEV = isDevelopment();
 
